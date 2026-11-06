@@ -1,5 +1,6 @@
 import './style.css';
 import { BALANCE_LIMIT, initialState, placeBlock, positionAt, speedForFloor, windForFloor } from '../shared/game.js';
+import { drawBackdrop, drawCrane, drawTowerBlock, themeForFloor } from './art.js';
 
 const API = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const app = document.querySelector('#app');
@@ -9,7 +10,7 @@ app.innerHTML = `
     <main>
       <section class="game-panel">
         <div class="hud"><div><small>FLOOR</small><strong id="floor">00</strong></div><div><small>SCORE</small><strong id="score">0</strong></div><div><small>COMBO</small><strong id="combo">×0</strong></div></div>
-        <div class="weather"><div><small>แรงลมชั้นนี้</small><strong id="wind">→ 0</strong></div><div class="balance"><small>สมดุลโครงสร้าง <span id="balance-number">0 / 80</span></small><div class="balance-track"><i id="balance-pointer"></i></div></div></div>
+        <div class="weather"><div><small>แรงลมชั้นนี้</small><strong id="wind">→ 0</strong><small id="building-style">แบบอาคาร</small></div><div class="balance"><small>สมดุลโครงสร้าง <span id="balance-number">0 / 80</span></small><div class="balance-track"><i id="balance-pointer"></i></div></div></div>
         <div class="canvas-wrap"><canvas id="game" width="400" height="600" aria-label="พื้นที่เล่นเกม"></canvas>
           <div class="overlay" id="overlay"><div class="overlay-card"><div class="eyebrow">BUILD AGAINST THE WIND</div><h1>SKY STACK</h1><p>วางชั้นตึกให้สูง พร้อมรักษาสมดุลต้านลม วาง Perfect เพื่อรับค้ำยันเพิ่ม</p><button id="action" class="primary">เริ่มก่อสร้าง <span>→</span></button><p class="hint">แตะหรือกด Space เพื่อวาง · กด B เพื่อเลือกค้ำยัน</p></div></div>
           <div class="toast" id="toast"></div>
@@ -33,6 +34,7 @@ function setHud() {
   $('#speed').textContent = speedForFloor(state?.floor || 0).toFixed(2);
   const wind = windForFloor(state?.seed || 0, state?.floor || 0);
   $('#wind').textContent = `${wind < 0 ? '←' : wind > 0 ? '→' : '·'} ${Math.abs(wind)}`;
+  $('#building-style').textContent = themeForFloor(state?.seed || 0, (state?.floor || 0) + 1).name;
   $('#balance-number').textContent = `${Math.round(state?.balance || 0)} / ${BALANCE_LIMIT}`;
   $('#balance-pointer').style.left = `${50 + Math.max(-50, Math.min(50, (state?.balance || 0) / BALANCE_LIMIT * 50))}%`;
   const brace = $('#brace'); brace.textContent = `ค้ำยัน ${state?.braces || 0}/2${braceQueued ? ' ✓' : ''}`;
@@ -97,6 +99,7 @@ function drop() {
   else if (state.status === 'playing') showToast(`+${state.score - (drop.previousScore || 0)} POINTS`);
   drop.previousScore = state.score;
   phaseStart = performance.now();
+  if (navigator.vibrate) navigator.vibrate(state.status === 'gameover' ? [70, 40, 90] : state.last.perfect ? 35 : 15);
   if (state.status !== 'playing') endRun();
 }
 
@@ -133,36 +136,33 @@ async function submitScore(event) {
   busy = false;
 }
 
-function roundedRect(x, y, w, h, radius, fill) {
-  ctx.fillStyle = fill; ctx.beginPath(); ctx.roundRect(x, y, w, h, radius); ctx.fill();
-}
-
 function draw(t) {
-  const w = 400, h = 600;
-  const sky = ctx.createLinearGradient(0, 0, 0, h); sky.addColorStop(0, '#143e61'); sky.addColorStop(.58, '#1d5674'); sky.addColorStop(1, '#2e7790');
-  ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = 'rgba(255,255,255,.07)';
-  for (let i = 0; i < 24; i++) { const x = (i * 97 + 35) % w, y = (i * 137 + 41) % 520; ctx.fillRect(x, y, 2, 2); }
-  for (let i = 0; i < 5; i++) { const x = ((i * 146 - t * .006) % 580 + 580) % 580 - 90; roundedRect(x, 140 + i * 92, 120, 15, 8, 'rgba(214,242,249,.08)'); }
-  ctx.fillStyle = '#16475d'; ctx.fillRect(0, 560, w, 40);
-  for (let i = 0; i < 8; i++) { ctx.fillStyle = i % 2 ? '#205b70' : '#194e65'; ctx.fillRect(i * 56, 515 + (i % 3) * 12, 44, 45); }
+  const bounds = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(bounds.width * dpr));
+  const height = Math.max(1, Math.round(bounds.height * dpr));
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#123d53'; ctx.fillRect(0, 0, width, height);
+  const scale = bounds.width < 500 ? bounds.width / 400 : Math.min(bounds.width / 400, bounds.height / 500);
+  const offsetX = (bounds.width - 400 * scale) / 2;
+  const cropTop = Math.max(0, 600 - bounds.height / scale);
+  ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * offsetX, -dpr * scale * cropTop);
   const current = state || initialState(12);
+  drawBackdrop(ctx, t, current.balance);
   const floor = current.floor;
   for (const block of current.blocks.slice(-12)) {
     const y = 510 - (block.floor - (floor - 1)) * 44;
     if (y < -44 || y > 600) continue;
-    roundedRect(block.x, y, block.width, 42, 3, block.floor % 2 ? '#f3af59' : '#e79a4e');
-    ctx.fillStyle = '#ffe0a1'; ctx.fillRect(block.x + 4, y + 4, Math.max(0, block.width - 8), 3);
-    ctx.fillStyle = '#825a47'; for (let x = block.x + 16; x < block.x + block.width - 10; x += 28) ctx.fillRect(x, y + 14, 12, 15);
+    drawTowerBlock(ctx, { ...block, y }, current.seed);
   }
   if (mode === 'playing') {
     const tick = Math.min(600, Math.floor((t - phaseStart) / (1000 / 60)));
     if (tick >= 600) queueMicrotask(drop);
     const x = positionAt(current.floor, current.width, tick, current.seed);
     const y = 466;
-    ctx.strokeStyle = '#b8d9df'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(x + current.width / 2, 0); ctx.lineTo(x + current.width / 2, y); ctx.stroke();
-    roundedRect(x, y, current.width, 42, 3, '#ffcb72');
-    ctx.fillStyle = '#ffe8ad'; ctx.fillRect(x + 4, y + 4, Math.max(0, current.width - 8), 3);
+    drawCrane(ctx, x + current.width / 2, y, Math.max(150, cropTop + 32));
+    drawTowerBlock(ctx, { x, y, width: current.width, floor: current.floor + 1 }, current.seed, true);
     ctx.fillStyle = 'rgba(255,255,255,.13)'; ctx.fillRect(current.x, y + 44, current.width, 2);
   }
   requestAnimationFrame(draw);
