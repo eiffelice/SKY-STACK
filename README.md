@@ -1,0 +1,90 @@
+# SKY STACK — Construction MVP
+
+เกมเครนวางชั้นตึก เล่นได้บนเว็บด้วยเมาส์ นิ้วสัมผัส หรือปุ่ม Space มีความเร็วเพิ่มตามชั้น คะแนน Perfect/Combo/Game Over และ Leaderboard ออนไลน์ผ่าน API ของโปรเจกต์เดียวกัน หน้าเว็บใช้ Canvas + Vite และกติกาใน `shared/game.js` ถูกใช้ซ้ำบนเซิร์ฟเวอร์ Node.js เพื่อคำนวณคะแนนจากการกดแต่ละครั้ง
+
+## สิ่งที่ต้องมี
+
+- Node.js 22 ขึ้นไป และ npm (ทดสอบด้วย Node.js 24; Capacitor 8 ต้องการ Node.js 22 ขึ้นไป)
+- สำหรับ deploy: เซิร์ฟเวอร์ที่มี Docker Compose, โดเมนที่ชี้ DNS มายังเซิร์ฟเวอร์ และเปิดพอร์ต 80/443
+- สำหรับ Android: Android Studio และ Android SDK; สำหรับ iOS: macOS และ Xcode ตามข้อกำหนดของ Capacitor
+
+## เริ่มเล่นในเครื่อง
+
+```bash
+npm ci
+npm test
+npm run build
+npm run server
+```
+
+เปิด `http://localhost:3000` เกมกับ API จะอยู่ที่โดเมนเดียวกัน ไฟล์คะแนนจะถูกสร้างที่ `data/sky-stack.json` (ไม่ควรลบหากต้องการเก็บอันดับ)
+
+สำหรับแก้หน้าเว็บระหว่างพัฒนา ให้เปิดสองหน้าต่างคำสั่งในโฟลเดอร์นี้:
+
+```bash
+npm run server
+```
+
+```bash
+npm run dev
+```
+
+แล้วเปิด `http://localhost:5173` โดย Vite จะส่งคำขอ `/api` ไปที่เซิร์ฟเวอร์พอร์ต 3000 ให้เอง หากต้องการเปลี่ยนพอร์ตเซิร์ฟเวอร์ ต้องแก้ proxy ใน `vite.config.js` ด้วย
+
+## วิธีเล่นและคะแนน
+
+- ปล่อยชั้นตึกทุก 0.3–10 วินาที เครนจะปล่อยอัตโนมัติเมื่อครบ 10 วินาที
+- ชั้นที่เหลื่อมจะถูกตัดส่วนที่ล้นออก ความกว้างน้อยกว่า 18 หน่วยหรือวางไม่ทับกัน = Game Over
+- ระยะห่างไม่เกิน 6 หน่วย = Perfect: คงความกว้างและรับ `100 + 25 × combo` (combo นับสูงสุด 20 ในสูตรคะแนน)
+- วางปกติได้ `50 + สัดส่วนที่ทับกัน × 50` โดยปัดเป็นจำนวนเต็ม และรีเซ็ต combo
+- ความเร็วเพิ่มจาก 1.65 เป็นสูงสุด 4.8 หน่วยต่อ tick; จบสำเร็จเมื่อถึง 100 ชั้น
+- ต้องวางได้อย่างน้อยหนึ่งชั้นก่อนส่งชื่อขึ้น Leaderboard
+
+## Deploy ให้เล่นออนไลน์ (ตัวอย่าง VPS + Docker Compose)
+
+1. ตั้ง DNS `A` ของโดเมน เช่น `game.example.com` ให้ชี้ IP เซิร์ฟเวอร์ และเปิดพอร์ต 80/443
+2. ติดตั้ง Docker และ Docker Compose บนเซิร์ฟเวอร์ แล้วคัดลอกทั้งโฟลเดอร์โปรเจกต์ขึ้นไป
+3. สร้างไฟล์ `.env` ในโฟลเดอร์โปรเจกต์ โดยใส่ `DOMAIN=game.example.com` (แทนด้วยโดเมนจริง)
+4. รัน `docker compose up -d --build`
+5. ตรวจ `https://game.example.com/api/health` ควรได้ `{"ok":true}` จากนั้นเปิด `https://game.example.com` เพื่อเล่น
+
+Caddy ใน `compose.yaml` จัดการ HTTPS ให้อัตโนมัติ ข้อมูลอันดับอยู่ใน Docker volume ชื่อ `scores` จึงยังอยู่หลัง rebuild container ให้สำรอง volume นี้เป็นระยะ เมื่อเปลี่ยนโดเมนให้แก้ `.env` แล้วรัน `docker compose up -d` อีกครั้ง
+
+หากใช้ hosting ที่มี HTTPS และ persistent disk ของตัวเอง ให้ใช้ `Dockerfile` หรือรัน `npm ci && npm run build && npm run server` แล้วกำหนด `PORT`, `DATA_FILE` (ชี้ไปยังดิสก์ถาวร) และ `ALLOWED_ORIGINS` เป็นรายการ origin คั่นด้วยจุลภาค ห้ามรันหลาย instance กับไฟล์ข้อมูลเดียวกัน เพราะไฟล์ JSON นี้ออกแบบสำหรับเซิร์ฟเวอร์หนึ่ง process เท่านั้น
+
+## แพ็กเป็น Android / iOS
+
+เว็บและแอปใช้โค้ดเกมเดียวกัน แต่แอปมือถือยังต้องเรียก API ที่ deploy แล้วผ่าน HTTPS:
+
+1. Deploy backend ตามขั้นตอนด้านบน
+2. เปลี่ยน `appId` ใน `capacitor.config.json` ให้เป็นรหัสแอปของคุณ เช่น `com.yourstudio.skystack` **ก่อน** สร้าง native project
+3. สร้างไฟล์ `.env.production` โดยใส่ `VITE_API_BASE_URL=https://game.example.com` (ไม่มี `/` ท้าย) ค่านี้เป็น URL สาธารณะ ถูกฝังในไฟล์แอป ไม่ใช่ที่เก็บ secret
+4. รัน `npm ci` และ `npm run build`
+5. รัน `npx cap add android` และ/หรือ `npx cap add ios` (iOS ต้องทำบน Mac)
+6. รัน `npx cap sync` แล้ว `npx cap open android` หรือ `npx cap open ios`
+7. ทดสอบบน emulator/เครื่องจริง จากนั้นตั้งค่า icon, splash, signing, privacy policy และ metadata ของร้านแอปก่อนเผยแพร่
+
+เมื่อแก้เว็บ ให้รัน `npm run mobile:sync` ก่อน build แอปครั้งถัดไป `android/` และ `ios/` ไม่ได้รวมในโค้ดตัวอย่าง เพราะ Capacitor สร้างให้ตามเครื่องและ SDK ที่ใช้งาน
+
+## API และการตรวจคะแนน
+
+| API | หน้าที่ |
+| --- | --- |
+| `POST /api/runs` | ออก run ID และ seed แบบสุ่ม |
+| `POST /api/scores` | รับ `id`, `name`, `ticks[]` แล้ว replay กติกาบนเซิร์ฟเวอร์ |
+| `GET /api/leaderboard` | คืน 10 อันดับสูงสุด |
+| `GET /api/health` | ตรวจสถานะเซิร์ฟเวอร์ |
+
+เซิร์ฟเวอร์ไม่รับคะแนนจาก client โดยตรง ตรวจลำดับกด ความยาวรอบ เวลาเล่นขั้นต่ำ อายุรอบสูงสุด 30 นาที และห้ามส่ง run ID ซ้ำ มี rate limit ตาม IP และตรวจชื่อก่อนบันทึก หน้าเว็บแสดงชื่อด้วย `textContent` เพื่อเลี่ยง HTML injection
+
+**ขอบเขตของ anti-cheat MVP:** replay ป้องกันการแก้ตัวเลขคะแนนและส่งรอบซ้ำ แต่ยังกันบอตที่คำนวณจังหวะกดหรือผู้ใช้ที่สร้าง API client เองไม่ได้ Leaderboard ใช้ชื่อที่ผู้เล่นตั้งเอง ไม่มีระบบบัญชีหรือยืนยันตัวตน และการจำกัดตาม IP เป็นแบบในหน่วยความจำ หากต้องการเปิดแข่งขันจริง ควรเพิ่มบัญชีผู้เล่น, signed challenges, ระบบตรวจพฤติกรรม, moderation, PostgreSQL/Redis และรองรับหลาย instance
+
+## โครงสร้าง
+
+```
+src/            หน้าเกมและสไตล์
+shared/game.js  กติกาที่หน้าเกมและเซิร์ฟเวอร์ใช้ร่วมกัน
+server/         API และที่เก็บคะแนน
+test/           ทดสอบกติกาและ API
+```
+
