@@ -1,5 +1,5 @@
 import './style.css';
-import { GAME_WIDTH, initialState, placeBlock, positionAt, speedForFloor } from '../shared/game.js';
+import { BALANCE_LIMIT, initialState, placeBlock, positionAt, speedForFloor, windForFloor } from '../shared/game.js';
 
 const API = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const app = document.querySelector('#app');
@@ -9,20 +9,21 @@ app.innerHTML = `
     <main>
       <section class="game-panel">
         <div class="hud"><div><small>FLOOR</small><strong id="floor">00</strong></div><div><small>SCORE</small><strong id="score">0</strong></div><div><small>COMBO</small><strong id="combo">×0</strong></div></div>
+        <div class="weather"><div><small>แรงลมชั้นนี้</small><strong id="wind">→ 0</strong></div><div class="balance"><small>สมดุลโครงสร้าง <span id="balance-number">0 / 80</span></small><div class="balance-track"><i id="balance-pointer"></i></div></div></div>
         <div class="canvas-wrap"><canvas id="game" width="400" height="600" aria-label="พื้นที่เล่นเกม"></canvas>
-          <div class="overlay" id="overlay"><div class="overlay-card"><div class="eyebrow">BUILD ABOVE THE CLOUDS</div><h1>SKY STACK</h1><p>แตะเพื่อปล่อยชั้นตึกจากเครน วางให้ตรงเพื่อรับ Perfect และต่อ Combo ให้สูงที่สุด</p><button id="action" class="primary">เริ่มก่อสร้าง <span>→</span></button><p class="hint">แตะหน้าจอ หรือกด Space เพื่อวางชั้นตึก</p></div></div>
+          <div class="overlay" id="overlay"><div class="overlay-card"><div class="eyebrow">BUILD AGAINST THE WIND</div><h1>SKY STACK</h1><p>วางชั้นตึกให้สูง พร้อมรักษาสมดุลต้านลม วาง Perfect เพื่อรับค้ำยันเพิ่ม</p><button id="action" class="primary">เริ่มก่อสร้าง <span>→</span></button><p class="hint">แตะหรือกด Space เพื่อวาง · กด B เพื่อเลือกค้ำยัน</p></div></div>
           <div class="toast" id="toast"></div>
         </div>
-        <div class="controls"><button id="drop" disabled>ปล่อยชั้นตึก <span>↓</span></button><div class="difficulty">ความเร็วเครน <span id="speed">1.65</span></div></div>
+        <div class="controls"><button id="drop" disabled>ปล่อยชั้นตึก <span>↓</span></button><button id="brace" disabled>ค้ำยัน 1/2</button><div class="difficulty">ความเร็วเครน <span id="speed">1.65</span></div></div>
       </section>
-      <aside><div class="side-title"><div><span class="eyebrow">GLOBAL RANKINGS</span><h2>Leaderboard</h2></div><button id="refresh" aria-label="รีเฟรชอันดับ">↻</button></div><div class="rank-head"><span>RANK / PLAYER</span><span>POINTS</span></div><ol id="leaders"></ol><div class="rules"><span class="eyebrow">HOW TO PLAY</span><p><b>01</b> แตะเพื่อปล่อยชั้นตึก</p><p><b>02</b> วางชิดขอบเดิมเพื่อรักษาความกว้าง</p><p><b>03</b> วางตรงเป๊ะ รับ Perfect + Combo</p><p><b>04</b> ตกพื้นเมื่อไร จบเกมทันที</p></div></aside>
+      <aside><div class="side-title"><div><span class="eyebrow">GLOBAL RANKINGS</span><h2>Leaderboard</h2></div><button id="refresh" aria-label="รีเฟรชอันดับ">↻</button></div><div class="rank-head"><span>RANK / PLAYER</span><span>POINTS</span></div><ol id="leaders"></ol><div class="rules"><span class="eyebrow">HOW TO PLAY</span><p><b>01</b> ดูทิศลมก่อนปล่อยชั้นตึก</p><p><b>02</b> วางเยื้องเพื่อต้านลมและแก้สมดุล</p><p><b>03</b> กดค้ำยันก่อนวางเพื่อลดแรงโยก</p><p><b>04</b> Perfect 3 ครั้ง รับค้ำยันเพิ่ม</p><p><b>05</b> สมดุลถึง ±80 = ตึกถล่ม</p></div></aside>
     </main><footer>SKY STACK · BUILD HIGHER EVERY RUN <span>เว็บ · Android · iOS</span></footer>
   </div>`;
 
 const $ = selector => document.querySelector(selector);
 const canvas = $('#game');
 const ctx = canvas.getContext('2d');
-let state = null, run = null, ticks = [], phaseStart = 0, busy = false;
+let state = null, run = null, ticks = [], bracesUsed = [], braceQueued = false, phaseStart = 0, busy = false;
 let mode = 'intro';
 
 function setHud() {
@@ -30,6 +31,13 @@ function setHud() {
   $('#score').textContent = (state?.score || 0).toLocaleString();
   $('#combo').textContent = `×${state?.combo || 0}`;
   $('#speed').textContent = speedForFloor(state?.floor || 0).toFixed(2);
+  const wind = windForFloor(state?.seed || 0, state?.floor || 0);
+  $('#wind').textContent = `${wind < 0 ? '←' : wind > 0 ? '→' : '·'} ${Math.abs(wind)}`;
+  $('#balance-number').textContent = `${Math.round(state?.balance || 0)} / ${BALANCE_LIMIT}`;
+  $('#balance-pointer').style.left = `${50 + Math.max(-50, Math.min(50, (state?.balance || 0) / BALANCE_LIMIT * 50))}%`;
+  const brace = $('#brace'); brace.textContent = `ค้ำยัน ${state?.braces || 0}/2${braceQueued ? ' ✓' : ''}`;
+  brace.disabled = mode !== 'playing' || !state?.braces;
+  brace.classList.toggle('selected', braceQueued);
 }
 
 function showToast(message) {
@@ -69,7 +77,7 @@ async function start() {
   $('#action').disabled = true; $('#action').textContent = 'กำลังเชื่อมต่อ...';
   try {
     run = await request('/api/runs', { method: 'POST', body: '{}' });
-    state = initialState(run.seed); ticks = []; drop.previousScore = 0; phaseStart = performance.now();
+    state = initialState(run.seed); ticks = []; bracesUsed = []; braceQueued = false; drop.previousScore = 0; phaseStart = performance.now();
     mode = 'playing'; $('#overlay').classList.add('hidden'); $('#drop').disabled = false; setHud();
   } catch (error) { $('#action').disabled = false; $('#action').textContent = 'ลองอีกครั้ง →'; showToast(error.message); }
   busy = false;
@@ -79,10 +87,13 @@ function drop() {
   if (mode !== 'playing' || !state || busy) return;
   const tick = Math.min(600, Math.floor((performance.now() - phaseStart) / (1000 / 60)));
   if (tick < 18) return;
+  if (braceQueued) bracesUsed.push(ticks.length);
   ticks.push(tick);
-  state = placeBlock(state, tick);
+  state = placeBlock(state, tick, braceQueued);
+  braceQueued = false;
   setHud();
-  if (state.last.perfect) showToast(`PERFECT! ×${state.combo}`);
+  if (state.status === 'gameover' && state.last.cause === 'collapse') showToast('ตึกเสียสมดุล!');
+  else if (state.last.perfect) showToast(`PERFECT! ×${state.combo}`);
   else if (state.status === 'playing') showToast(`+${state.score - (drop.previousScore || 0)} POINTS`);
   drop.previousScore = state.score;
   phaseStart = performance.now();
@@ -96,7 +107,7 @@ function endRun() {
   card.replaceChildren();
   const eyebrow = document.createElement('div'); eyebrow.className = 'eyebrow'; eyebrow.textContent = state.status === 'complete' ? 'SUMMIT REACHED' : 'CONSTRUCTION COMPLETE';
   const title = document.createElement('h1'); title.textContent = state.status === 'complete' ? 'สุดยอด!' : 'GAME OVER';
-  const summary = document.createElement('p'); summary.textContent = `${state.floor} ชั้น · ${state.score.toLocaleString()} คะแนน · ${state.perfects} Perfect`;
+  const summary = document.createElement('p'); summary.textContent = `${state.floor} ชั้น · ${state.score.toLocaleString()} คะแนน · ${state.perfects} Perfect${state.last?.cause === 'collapse' ? ' · ตึกเสียสมดุล' : ''}`;
   card.append(eyebrow, title, summary);
   if (eligible) {
     const form = document.createElement('form'); form.id = 'score-form';
@@ -115,7 +126,7 @@ async function submitScore(event) {
   busy = true; button.disabled = true; button.textContent = 'กำลังบันทึก...';
   try {
     const name = input.value.trim();
-    await request('/api/scores', { method: 'POST', body: JSON.stringify({ id: run.id, name, ticks }) });
+    await request('/api/scores', { method: 'POST', body: JSON.stringify({ id: run.id, name, ticks, braces: bracesUsed }) });
     localStorage.setItem('sky-stack-name', name);
     button.textContent = 'บันทึกแล้ว ✓'; await loadLeaders();
   } catch (error) { button.disabled = false; button.textContent = 'ลองบันทึกอีกครั้ง →'; showToast(error.message); }
@@ -159,8 +170,13 @@ function draw(t) {
 
 $('#action').addEventListener('click', start);
 $('#drop').addEventListener('click', drop);
+$('#brace').addEventListener('click', () => { if (mode === 'playing' && state?.braces) { braceQueued = !braceQueued; setHud(); } });
 canvas.addEventListener('pointerdown', event => { event.preventDefault(); drop(); });
-window.addEventListener('keydown', event => { if (event.code === 'Space' && event.target.tagName !== 'INPUT') { event.preventDefault(); drop(); } });
+window.addEventListener('keydown', event => {
+  if (event.target.tagName === 'INPUT') return;
+  if (event.code === 'Space') { event.preventDefault(); drop(); }
+  if (event.code === 'KeyB' && mode === 'playing' && state?.braces) { braceQueued = !braceQueued; setHud(); }
+});
 $('#refresh').addEventListener('click', loadLeaders);
 setHud(); loadLeaders(); requestAnimationFrame(draw);
 

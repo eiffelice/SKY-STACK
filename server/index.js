@@ -68,7 +68,7 @@ function handleApi(req, res, url) {
       const age = Date.now() - session.issuedAt;
       if (age < 0 || age > 30 * 60_000) return send(res, 400, { error: 'Run expired' });
       let state;
-      try { state = replay(session.seed, payload.ticks); }
+      try { state = replay(session.seed, payload.ticks, payload.braces ?? []); }
       catch { return send(res, 400, { error: 'Invalid replay' }); }
       const minimumMs = payload.ticks.reduce((a, b) => a + b, 0) / TICKS_PER_SECOND * 1000;
       if (age + 1800 < minimumMs) return send(res, 400, { error: 'Run completed too quickly' });

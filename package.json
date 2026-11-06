@@ -5,10 +5,10 @@
   "type": "module",
   "engines": { "node": ">=22" },
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
+    "dev": "vite --host 0.0.0.0 --configLoader runner",
     "server": "node server/index.js",
-    "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0",
+    "build": "vite build --configLoader runner",
+    "preview": "vite preview --host 0.0.0.0 --configLoader runner",
     "test": "node --test",
     "mobile:sync": "npm run build && cap sync"
   },

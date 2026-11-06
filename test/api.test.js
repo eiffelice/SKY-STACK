@@ -44,6 +44,7 @@ test('API verifies replay, publishes score, and rejects reuse', async () => {
     const { ticks, state } = finishedTicks(seed);
     const post = data => fetch(`${base}/api/scores`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
     assert.equal((await post({ id, name: '<script>', ticks })).status, 400);
+    assert.equal((await post({ id, name: 'Builder', ticks, braces: [0, 0] })).status, 400);
     const waitMs = Math.max(0, Math.ceil(ticks.reduce((a, b) => a + b, 0) / 60 * 1000 - (Date.now() - issuedAt) - 1500));
     if (waitMs) await new Promise(resolve => setTimeout(resolve, waitMs));
     const result = await post({ id, name: 'Builder', ticks });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { initialState, placeBlock, positionAt, replay, speedForFloor } from '../shared/game.js';
+import { initialState, placeBlock, positionAt, replay, speedForFloor, windForFloor } from '../shared/game.js';
 
 function closestTick(state) {
   let best = 18, distance = Infinity;
@@ -24,6 +24,29 @@ test('perfect placement preserves width, increases combo and score', () => {
 test('crane accelerates and speed is capped', () => {
   assert.ok(speedForFloor(20) > speedForFloor(0));
   assert.equal(speedForFloor(100), 4.8);
+});
+
+test('wind is deterministic and structural collapse can be prevented by a brace', () => {
+  assert.equal(windForFloor(42, 40), windForFloor(42, 40));
+  const risky = { ...initialState(42), floor: 40, balance: 70 };
+  const collapse = placeBlock(risky, 30);
+  const braced = placeBlock(risky, 30, true);
+  assert.equal(collapse.status, 'gameover');
+  assert.equal(collapse.last.cause, 'collapse');
+  assert.equal(braced.status, 'playing');
+  assert.equal(braced.braces, 0);
+  assert.ok(Math.abs(braced.balance) < Math.abs(collapse.balance));
+});
+
+test('three perfect placements earn a brace and forged brace use is rejected', () => {
+  let state = initialState(42);
+  state = placeBlock(state, closestTick(state), true);
+  assert.equal(state.braces, 0);
+  assert.throws(() => placeBlock(state, 18, true), /Invalid placement/);
+  for (let i = 0; i < 2; i++) state = placeBlock(state, closestTick(state));
+  assert.equal(state.perfects, 3);
+  assert.equal(state.braces, 1);
+  assert.throws(() => replay(42, [18, 18], [0, 0]), /Invalid brace log/);
 });
 
 test('replay rejects unfinished and forged ticks', () => {
